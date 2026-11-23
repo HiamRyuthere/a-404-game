@@ -476,6 +476,27 @@ main{
   background:var(--hot);
 }
 
+.meter{
+  height:5px;
+  margin-top:3px;
+  border:2px solid var(--bd);
+  background:var(--surface);
+  overflow:hidden;
+}
+
+.meter i{
+  display:block;
+  height:100%;
+  width:0;
+  background:var(--blue);
+  transition:width .1s linear;
+}
+
+.meter.is-full i{
+  background:var(--acid);
+  animation:coachPulse .5s steps(2) infinite;
+}
+
 .fhud__mid{
   flex:0 0 auto;
   text-align:center;
@@ -614,6 +635,40 @@ body.has-touch .pad{ display:flex; }
 }
 
 .meme.is-on{ animation:memePop 1.6s steps(14) forwards; }
+
+.dim{
+  position:absolute;
+  inset:0;
+  z-index:5;
+  background:#000;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .9s linear;
+}
+
+.dim.is-on{ opacity:.62; }
+
+.quote{
+  position:absolute;
+  left:0; right:0; bottom:15%;
+  z-index:6;
+  text-align:center;
+  pointer-events:none;
+  opacity:0;
+  transition:opacity 1.1s linear;
+}
+
+.quote.is-on{ opacity:1; }
+
+.quote p{
+  margin:0 auto;
+  max-width:24ch;
+  font-size:clamp(13px, 2.5vw, 19px);
+  line-height:1.7;
+  letter-spacing:.02em;
+  color:#fff;
+  text-shadow:0 2px 0 #000, 0 0 18px rgba(0,0,0,.8);
+}
 
 .finish{
   position:absolute;
@@ -881,12 +936,15 @@ body.has-touch .tips{ display:none; }
           <li><b>V</b><span>uppercut</span></li>
           <li><b>B</b><span>sweep</span></li>
           <li><b>C</b><span>block (hold)</span></li>
+          <li><b>E</b><span>special</span></li>
           <li><b>R</b><span>restart</span></li>
         </ul>
         <p class="rules__goal">
           Best of <b>3 rounds</b>, 60s each. Punch is quick, kick is heavier,
           <b>uppercut</b> launches them, <b>sweep</b> knocks them down, <b>block</b>
-          cuts damage to a sliver. Win the last round and you get a <b>FINISH HIM!</b> window.
+          cuts damage to a sliver. Land hits to fill the <b>blue meter</b> — full hone par
+          <b>E</b> dabao aur apna signature move chalao. Win the last round and you get a
+          <b>FINISH HIM!</b> window.
         </p>
       </div>
     </div>
@@ -896,6 +954,7 @@ body.has-touch .tips{ display:none; }
       <div class="fhud__side">
         <span class="fhud__name"><span id="nameP">You</span> <span class="pips" id="pipsP"><i></i><i></i></span></span>
         <div class="hpbar"><b id="hpP"></b></div>
+        <div class="meter" id="meterP"><i id="meterFill"></i></div>
       </div>
       <div class="fhud__mid"><b id="ftimer">60</b></div>
       <div class="fhud__side fhud__side--r">
@@ -922,6 +981,7 @@ body.has-touch .tips{ display:none; }
         <button type="button" class="atk" data-act="upper" aria-label="Uppercut">UPP</button>
         <button type="button" class="atk" data-act="sweep" aria-label="Sweep">SWP</button>
         <button type="button" class="blk" data-act="block" aria-label="Block">BLK</button>
+        <button type="button" class="blk" data-act="special" aria-label="Special move">SPL</button>
       </div>
     </div>
 
@@ -948,10 +1008,13 @@ body.has-touch .tips{ display:none; }
       <span><b>V</b> uppercut</span>
       <span><b>B</b> sweep</span>
       <span><b>C</b> block</span>
+      <span><b>E</b> special (full meter)</span>
     </div>
 
     <div class="banner" id="banner" aria-hidden="true"></div>
     <div class="meme" id="meme" aria-hidden="true"></div>
+    <div class="dim" id="dim" aria-hidden="true"></div>
+    <div class="quote" id="quote" aria-hidden="true"><p id="quoteText"></p></div>
     <button class="finish" id="finishBtn" type="button" hidden>Finish him!</button>
 
     <!-- interactive mascot (works before the game starts) -->
@@ -1199,6 +1262,11 @@ body.has-touch .tips{ display:none; }
   var hpE       = document.getElementById('hpE');
   var ftimer    = document.getElementById('ftimer');
   var nameE     = document.getElementById('nameE');
+  var dimEl     = document.getElementById('dim');
+  var quoteEl   = document.getElementById('quote');
+  var quoteText = document.getElementById('quoteText');
+  var meterP    = document.getElementById('meterP');
+  var meterFill = document.getElementById('meterFill');
   var pipsP     = document.getElementById('pipsP').querySelectorAll('i');
   var pipsE     = document.getElementById('pipsE').querySelectorAll('i');
 
@@ -1309,6 +1377,90 @@ body.has-touch .tips{ display:none; }
     src.stop(t + dur + 0.02);
   }
 
+  function noiseAt(t, dur, type, freq, q, vol, attack) {
+    if (muted) return;
+    var a = audioCtx();
+    var buf = getNoise();
+    if (!a || !buf) return;
+    var src = a.createBufferSource();
+    src.buffer = buf;
+    var f = a.createBiquadFilter();
+    f.type = type || 'bandpass';
+    f.frequency.value = freq || 800;
+    f.Q.value = q || 1;
+    var g = a.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol || 0.05, t + (attack || 0.004));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f);
+    f.connect(g);
+    g.connect(a.destination);
+    src.start(t);
+    src.stop(t + dur + 0.02);
+  }
+
+  function toneAt(t, f0, f1, dur, type, vol) {
+    if (muted) return;
+    var a = audioCtx();
+    if (!a) return;
+    var o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(24, f1), t + dur);
+    g.gain.setValueAtTime(vol || 0.05, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g);
+    g.connect(a.destination);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
+
+  /* dhol: low membrane slap */
+  function dholAt(t, v) {
+    toneAt(t, 130, 48, 0.20, 'sine', 0.085 * v);
+    noiseAt(t, 0.07, 'lowpass', 420, 1, 0.05 * v);
+  }
+
+  /* tabla: short pitched 'na' / 'tin' */
+  function tablaAt(t, hi, v) {
+    toneAt(t, hi ? 520 : 330, hi ? 470 : 300, 0.10, 'sine', 0.045 * v);
+    noiseAt(t, 0.035, 'bandpass', hi ? 2400 : 1500, 2, 0.028 * v);
+  }
+
+  function tickAt(t, v) {
+    noiseAt(t, 0.03, 'highpass', 3200, 1, 0.02 * v);
+  }
+
+  /* ---------- reactive dhol loop ---------- */
+  var music = { next: 0, step: 0 };
+
+  function musicTick(heat) {
+    if (muted) { music.next = 0; return; }
+    var a = audioCtx();
+    if (!a) return;
+
+    if (!music.next || music.next < a.currentTime) music.next = a.currentTime + 0.06;
+
+    var bpm = 86 + heat * 46;
+    var stepDur = 60 / bpm / 4;
+
+    while (music.next < a.currentTime + 0.22) {
+      var s = music.step % 16;
+      var t = music.next;
+
+      if (s === 0 || s === 6 || s === 10) dholAt(t, s === 0 ? 1 : 0.72);
+      if (heat > 0.45 && (s === 3 || s === 13)) dholAt(t, 0.5);
+
+      if (s === 2 || s === 5 || s === 8 || s === 11 || s === 14) {
+        tablaAt(t, s % 4 === 2, 0.6 + heat * 0.5);
+      }
+      if (heat > 0.62 && s % 2 === 1) tickAt(t, 0.6 + heat * 0.6);
+
+      music.next += stepDur;
+      music.step++;
+    }
+  }
+
   function sfx(kind) {
     if (kind === 'whoosh') {
       noise(0.13, 'bandpass', 1100, 1.4, 0.05);
@@ -1372,7 +1524,9 @@ body.has-touch .tips{ display:none; }
       trainBody:  [0.52, 0.16, 0.14],
       trainCoach: [0.28, 0.29, 0.33],
       trainGlass: [0.86, 0.90, 0.95],
-      chakra:     [0.10, 0.16, 0.48]
+      stone:      [0.44, 0.26, 0.17],
+      stoneD:     [0.26, 0.14, 0.09],
+      stoneL:     [0.56, 0.36, 0.24]
     },
     light: {
       fog:    [0.91, 0.90, 0.87],
@@ -1399,7 +1553,9 @@ body.has-touch .tips{ display:none; }
       trainBody:  [0.58, 0.18, 0.15],
       trainCoach: [0.32, 0.33, 0.37],
       trainGlass: [0.92, 0.95, 0.98],
-      chakra:     [0.10, 0.16, 0.48]
+      stone:      [0.62, 0.42, 0.30],
+      stoneD:     [0.38, 0.22, 0.14],
+      stoneL:     [0.74, 0.54, 0.40]
     }
   };
 
@@ -1483,27 +1639,27 @@ body.has-touch .tips{ display:none; }
   var AMB_R = 0.30 * 0.86, AMB_G = 0.30 * 0.94, AMB_B = 0.30 * 1.08;
   var KEY_R = 0.95 * 1.07, KEY_G = 0.95 * 1.00, KEY_B = 0.95 * 0.90;
 
-  var MAXOBJ = 280;
+  var MAXOBJ = 360;
 
   /* moves */
   /* ---------- roster ---------- */
   var CHARS = [
     { id: 'bajji', name: 'Bajji',
       shirt: [0.58, 0.64, 0.16], belt: [0.85, 0.92, 0.25], skin: [0.85, 0.67, 0.51], hair: [0.09, 0.08, 0.07],
-      spd: 1.00, pow: 1.00, hp: 100, tag: 'balanced' },
+      spd: 1.00, pow: 1.00, hp: 100, tag: 'balanced', special: 'lathi', spName: 'Lathi Spin' },
     { id: 'pahalwan', name: 'Pahalwan',
       shirt: [0.30, 0.36, 0.62], belt: [0.95, 0.72, 0.15], skin: [0.78, 0.58, 0.42], hair: [0.07, 0.06, 0.05],
-      spd: 0.86, pow: 1.28, hp: 118, tag: 'heavy hitter' },
+      spd: 0.86, pow: 1.28, hp: 118, tag: 'heavy hitter', special: 'dhol', spName: 'Dhol Blast' },
     { id: 'chhota', name: 'Chhota',
       shirt: [0.62, 0.22, 0.55], belt: [0.95, 0.90, 0.30], skin: [0.90, 0.74, 0.58], hair: [0.12, 0.09, 0.07],
-      spd: 1.20, pow: 0.82, hp: 88, tag: 'quick' }
+      spd: 1.20, pow: 0.82, hp: 88, tag: 'quick', special: 'chappal', spName: 'Chappal Throw' }
   ];
 
   var BOSS = {
     id: 'raakshaz', name: 'Raakshaz',
     shirt: [0.22, 0.30, 0.20], belt: [0.62, 0.12, 0.10],
     skin: [0.34, 0.44, 0.30], hair: [0.05, 0.05, 0.05],
-    spd: 0.78, pow: 1.75, hp: 220, tag: 'monster'
+    spd: 0.78, pow: 1.75, hp: 220, tag: 'monster', special: 'dhol', spName: 'Dhol Blast'
   };
 
   var chosen = 0;
@@ -1585,19 +1741,27 @@ body.has-touch .tips{ display:none; }
       round: 1, winsP: 0, winsE: 0, timeLeft: 60,
       phase: 'intro',          /* intro | fight | ko | finish | fatality */
       phaseT: 0, cheer: 0, shake: 0, slow: 0, fatHit: false, loser: null,
-      bossMode: false, bossDone: false,
+      bossMode: false, bossDone: false, heat: 0, meter: 0,
+      proj: { on: false, x: 0, y: 0, vx: 0, owner: null, life: 0, spin: 0 },
       train: { on: false, warn: 0, x: 0, dir: 1, next: 15, hitP: false, hitE: false }
     };
 
     var crowd = [];
+    var SKINS = [[0.86, 0.68, 0.52], [0.78, 0.58, 0.42], [0.66, 0.46, 0.32], [0.90, 0.76, 0.60]];
+    var SHIRTS = [[0.55, 0.20, 0.18], [0.24, 0.34, 0.52], [0.30, 0.44, 0.26], [0.62, 0.50, 0.16], [0.42, 0.28, 0.48], [0.20, 0.20, 0.22]];
+    var HAIRS = [[0.07, 0.06, 0.05], [0.14, 0.10, 0.07], [0.30, 0.30, 0.32]];
+
     (function buildCrowd() {
       for (var r = 0; r < 2; r++) {
         for (var i = 0; i < 7; i++) {
           crowd.push({
             x: -11 + i * 3.4 + r * 1.7,
             z: -6.4 - r * 1.7,
-            h: 0.85 + Math.random() * 0.3,
-            ph: Math.random() * 6.28
+            h: 0.82 + Math.random() * 0.32,
+            ph: Math.random() * 6.28,
+            col: SHIRTS[(Math.random() * SHIRTS.length) | 0],
+            skin: SKINS[(Math.random() * SKINS.length) | 0],
+            hair: HAIRS[(Math.random() * HAIRS.length) | 0]
           });
         }
       }
@@ -1647,6 +1811,10 @@ body.has-touch .tips{ display:none; }
       hpP.style.width = Math.max(0, P.hp / P.maxHp * 100) + '%';
       hpE.style.width = Math.max(0, E.hp / E.maxHp * 100) + '%';
       ftimer.textContent = Math.ceil(Math.max(0, st.timeLeft));
+      if (meterFill) {
+        meterFill.style.width = st.meter + '%';
+        meterP.classList.toggle('is-full', st.meter >= 100);
+      }
       for (var i = 0; i < pipsP.length; i++) pipsP[i].classList.toggle('is-on', i < st.winsP);
       for (var j = 0; j < pipsE.length; j++) pipsE[j].classList.toggle('is-on', j < st.winsE);
     }
@@ -1662,19 +1830,7 @@ body.has-touch .tips{ display:none; }
         banner(playerWon ? 'MONSTER DOWN' : 'YOU LOSE');
         setTimeout(function () {
           if (fhud.hidden) return;
-          running = false;
-          cancelAnimationFrame(st.raf);
-          overTag.textContent = playerWon ? 'monster down' : 'monster wins';
-          overTitle.textContent = playerWon ? 'YOU BEAT IT' : 'GAME OVER';
-          overText.textContent = playerWon ? 'The 404 finally makes sense.' : 'The monster kept the belt.';
-          over.hidden = false;
-          fhud.hidden = true;
-          pad.hidden = true;
-          tips.hidden = true;
-          exitBtn.hidden = true;
-          muteBtn.hidden = true;
-          finishBtn.hidden = true;
-          sfx(playerWon ? 'win' : 'lose');
+          if (playerWon) startCelebrate(); else startDefeat();
         }, 1800);
         return;
       }
@@ -1734,6 +1890,47 @@ body.has-touch .tips{ display:none; }
       }
     }
 
+    var QUOTES = [
+      'Girna zaroori hai — uthne ka tareeka wahi sikhaata hai.',
+      'Aaj ki haar, kal ki kahani ka sirf ek panna hai.',
+      'Jo akhade mein gira, wahi asli pehalwan banta hai.',
+      'Thak jaana allowed hai. Ruk jaana nahi.',
+      'Ek match haara, apne aap ko nahi.'
+    ];
+
+    function startCelebrate() {
+      st.phase = 'celebrate';
+      st.phaseT = 0;
+      P.victory = true;
+      P.state = 'idle'; P.tilt = 0; P.down = 0; P.stun = 0; P.sp = null;
+      P.x = 0;
+      finishBtn.hidden = true;
+      E.x = 24; E.state = 'idle'; E.sp = null;
+      banner('JEET GAYE!');
+      meme('sab utha lete hain', true);
+      sfx('win');
+      sfx('crowd');
+      st.cheer = 8;
+    }
+
+    function startDefeat() {
+      st.phase = 'defeat';
+      st.phaseT = 0;
+      P.victory = false;
+      P.state = 'sit';
+      P.tilt = 0; P.y = 0; P.vy = 0; P.vx = 0;
+      P.x = -6.4;
+      P.sp = null;
+      E.x = 24; E.state = 'idle'; E.sp = null;
+      finishBtn.hidden = true;
+      banner('');
+      sfx('lose');
+      if (dimEl) dimEl.classList.add('is-on');
+      if (quoteText) quoteText.textContent = QUOTES[(Math.random() * QUOTES.length) | 0];
+      if (quoteEl) quoteEl.classList.add('is-on');
+      st.cheer = 0;
+    }
+
     function startBoss() {
       st.bossMode = true;
       st.bossDone = true;
@@ -1769,9 +1966,8 @@ body.has-touch .tips{ display:none; }
     }
 
     function matchOver() {
-      running = false;
-      cancelAnimationFrame(st.raf);
       var won = st.winsP > st.winsE;
+
       if (won && !st.bossDone) {
         running = true;
         cancelAnimationFrame(st.raf);
@@ -1779,6 +1975,14 @@ body.has-touch .tips{ display:none; }
         startBoss();
         return;
       }
+
+      if (won) { startCelebrate(); return; }
+      startDefeat(); return;
+    }
+
+    function showEndCard(won) {
+      running = false;
+      cancelAnimationFrame(st.raf);
       overTag.textContent = won ? 'match won' : 'match lost';
       overTitle.textContent = won ? 'YOU WIN' : 'CPU WINS';
       overText.textContent = st.winsP + ' — ' + st.winsE + '  ·  round ' + st.round;
@@ -1820,7 +2024,24 @@ body.has-touch .tips{ display:none; }
         return;
       }
 
-      if (f.stun > 0) {
+      if (f.sp) {
+        f.sp.t += dt;
+        f.vx = 0;
+        var kind = f.sp.kind;
+
+        if (kind === 'lathi' && !f.sp.done && f.sp.t > 0.18) {
+          f.sp.done = true;
+          lathiHit(f, other);
+        } else if (kind === 'dhol' && !f.sp.done && f.sp.t > 0.30) {
+          f.sp.done = true;
+          dholBlast(f, other);
+        } else if (kind === 'chappal' && !f.sp.done && f.sp.t > 0.16) {
+          f.sp.done = true;
+          throwChappal(f);
+        }
+
+        if (f.sp.t > 0.9) { f.sp = null; f.state = 'idle'; }
+      } else if (f.stun > 0) {
         f.stun -= dt;
         if (f.stun <= 0) f.state = 'idle';
       } else if (f.attack) {
@@ -1871,20 +2092,7 @@ body.has-touch .tips{ display:none; }
       var bound = st.aspect < 1 ? 6.2 : 11.5;
       f.x = Math.max(-bound, Math.min(bound, f.x));
 
-      /* smooth joint animation */
-      var T = poseTarget(f);
-      var kk = Math.min(1, dt * 14);
-      f.pose.lf1 += (T.lf1 - f.pose.lf1) * kk;
-      f.pose.lf2 += (T.lf2 - f.pose.lf2) * kk;
-      f.pose.lb1 += (T.lb1 - f.pose.lb1) * kk;
-      f.pose.lb2 += (T.lb2 - f.pose.lb2) * kk;
-      f.pose.af1 += (T.af1 - f.pose.af1) * kk;
-      f.pose.af2 += (T.af2 - f.pose.af2) * kk;
-      f.pose.ab1 += (T.ab1 - f.pose.ab1) * kk;
-      f.pose.ab2 += (T.ab2 - f.pose.ab2) * kk;
-      f.pose.lean += (T.lean - f.pose.lean) * kk;
-      f.pose.crouch += (T.crouch - f.pose.crouch) * kk;
-      f.pose.head += (T.head - f.pose.head) * kk;
+      applyPose(f, dt);
     }
 
     function separate(a, b) {
@@ -1934,6 +2142,9 @@ body.has-touch .tips{ display:none; }
         if (m.launch) { b.vy = m.launch; b.y = Math.max(b.y, 0.02); b.stun = 0.5; }
         if (m.knock) { b.down = 0.85; b.stun = 0.85; b.state = 'down'; }
         st.cheer = 1.3;
+        st.heat = Math.min(1, st.heat + (m.heavy ? 0.22 : 0.14));
+        if (a === P) st.meter = Math.min(100, st.meter + (m.heavy ? 14 : 9));
+        else st.meter = Math.min(100, st.meter + 6);
         st.shake = m.heavy ? 0.5 : 0.25;
         sfx(m.heavy ? 'heavy' : 'hit');
         memeFrom(m.heavy ? 'heavy' : 'hit');
@@ -1951,6 +2162,68 @@ body.has-touch .tips{ display:none; }
         memeFrom('ko');
         endRound(b === E);
       }
+    }
+
+    /* ---------- signature moves ---------- */
+    function hurtOpponent(f, other, dmg, kb, knock) {
+      if (!other || other.state === 'ko') return;
+      var blocked = other.state === 'block' && other.face !== f.face;
+      var d = blocked ? dmg * 0.2 : dmg * f.ch.pow;
+
+      other.hp = Math.max(0, other.hp - d);
+      other.vx = f.face * kb;
+      if (!blocked) {
+        other.stun = knock ? 0.9 : 0.42;
+        other.state = knock ? 'down' : 'hurt';
+        if (knock) other.down = 0.9;
+        other.attack = null;
+      }
+      st.cheer = 1.8;
+      st.heat = Math.min(1, st.heat + 0.3);
+      st.shake = 0.7;
+      spark(other.x - f.face * 0.7, other.y + 1.4, true);
+      sfx(blocked ? 'block' : 'heavy');
+      paintHud();
+      if (other.hp <= 0) { other.state = 'ko'; other.attack = null; memeFrom('ko'); endRound(other === E); }
+    }
+
+    function dholBlast(f, other) {
+      st.shake = 1.0;
+      sfx('heavy');
+      sfx('rumble');
+      if (Math.abs(other.x - f.x) < 4.8 && other.y < 2.0) {
+        hurtOpponent(f, other, 18, 5, true);
+      }
+    }
+
+    function lathiHit(f, other) {
+      var dx = (other.x - f.x) * f.face;
+      sfx('whoosh');
+      if (dx > 0.2 && dx < 3.4 && Math.abs(other.y - f.y) < 2.0) {
+        hurtOpponent(f, other, 16, 4.5, true);
+      }
+    }
+
+    function throwChappal(f) {
+      var pr = st.proj;
+      pr.on = true;
+      pr.x = f.x + f.face * 0.9;
+      pr.y = 1.1;
+      pr.vx = f.face * 22;
+      pr.owner = f;
+      pr.life = 1.4;
+      pr.spin = 0;
+      sfx('whoosh');
+    }
+
+    function doSpecial(f, other) {
+      if (!f.ch || !f.ch.special) return false;
+      if (f.sp || f.attack || f.stun > 0 || f.down > 0 || f.state === 'ko') return false;
+      f.sp = { kind: f.ch.special, t: 0, done: false };
+      f.state = 'special';
+      f.vx = 0;
+      sfx('bell');
+      return true;
     }
 
     /* ---------- the 5:15 local: a train that cuts across the ring ---------- */
@@ -2077,6 +2350,12 @@ body.has-touch .tips{ display:none; }
       var camY = portrait ? 2.9 : 2.6;
       var pitch = portrait ? 0.12 : 0.07;
 
+      if (st.phase === 'defeat') {
+        camZ = 6.4; camY = 1.15; mid = P.x + 0.9; pitch = 0.10;
+      } else if (st.phase === 'celebrate') {
+        camZ = 12; camY = 2.5; mid = P.x;
+      }
+
       var yaw = 0.14;
       var targetX = mid - camZ * Math.tan(yaw);
 
@@ -2086,6 +2365,7 @@ body.has-touch .tips{ display:none; }
 
       rotY(ry, yaw);
       rotX(rx, pitch);
+
       var jx = st.shake > 0 ? (Math.random() - 0.5) * st.shake * 0.7 : 0;
       var jy = st.shake > 0 ? (Math.random() - 0.5) * st.shake * 0.7 : 0;
       trans(tr, -(st.camX + jx), -(st.camY + jy), -camZ);
@@ -2213,6 +2493,10 @@ body.has-touch .tips{ display:none; }
         t.lb1 = -0.30; t.lb2 = 0.55;
         t.af1 = 0.75; t.ab1 = 0.45;
         t.crouch = 0.34; t.lean = 0.18;
+      } else if (s === 'sit') {
+        t.lf1 = 1.55; t.lf2 = -2.0; t.lb1 = 1.25; t.lb2 = -1.8;
+        t.af1 = 0.55; t.af2 = 0.95; t.ab1 = 0.45; t.ab2 = 1.05;
+        t.crouch = 0.52; t.lean = 0.22; t.head = 1;
       } else if (s === 'block') {
         t.af1 = 0.55; t.af2 = 2.75;
         t.ab1 = 0.48; t.ab2 = 2.80;
@@ -2228,6 +2512,22 @@ body.has-touch .tips{ display:none; }
         t.lean = -0.18;
       }
       return t;
+    }
+
+    function applyPose(f, dt) {
+      var T = poseTarget(f);
+      var kk = Math.min(1, dt * 14);
+      f.pose.lf1 += (T.lf1 - f.pose.lf1) * kk;
+      f.pose.lf2 += (T.lf2 - f.pose.lf2) * kk;
+      f.pose.lb1 += (T.lb1 - f.pose.lb1) * kk;
+      f.pose.lb2 += (T.lb2 - f.pose.lb2) * kk;
+      f.pose.af1 += (T.af1 - f.pose.af1) * kk;
+      f.pose.af2 += (T.af2 - f.pose.af2) * kk;
+      f.pose.ab1 += (T.ab1 - f.pose.ab1) * kk;
+      f.pose.ab2 += (T.ab2 - f.pose.ab2) * kk;
+      f.pose.lean += (T.lean - f.pose.lean) * kk;
+      f.pose.crouch += (T.crouch - f.pose.crouch) * kk;
+      f.pose.head += (T.head - f.pose.head) * kk;
     }
 
     /* ---------- fighter rendering: detailed human anatomy ---------- */
@@ -2435,30 +2735,54 @@ body.has-touch .tips{ display:none; }
       cube(-7, 3.2, -8.3, 0.7, 6.6, 0.7, pal.wall, 1);
       cube(7, 3.2, -8.3, 0.7, 6.6, 0.7, pal.wall, 1);
 
-      /* banner over the ring */
-      cube(0, 6.6, -8.75, 6.5, 1.6, 0.2, pal.wall, 1);
-      cube(0, 6.95, -8.7, 6, 0.4, 0.3, [0.95, 0.55, 0.15], 1);
-      cube(0, 6.55, -8.7, 6, 0.4, 0.3, [0.96, 0.95, 0.90], 1);
-      cube(0, 6.15, -8.7, 6, 0.4, 0.3, [0.20, 0.60, 0.26], 1);
+      /* akhada mural: two pehalwans locked in a grapple */
+      cube(0, 5.5, -8.8, 7.6, 3.0, 0.25, pal.wall, 1);
+      cube(0, 5.5, -8.72, 7.0, 2.6, 0.3, pal.stone, 1);
+      cube(0, 6.85, -8.55, 7.2, 0.22, 0.35, pal.stoneL, 1);
+      cube(0, 4.15, -8.55, 7.2, 0.22, 0.35, pal.stoneL, 1);
 
-      /* ashoka chakra: spokes + rim */
-      for (var sp2 = 0; sp2 < 8; sp2++) {
-        cube(0, 6.55, -8.55, 0.56, 0.045, 0.05, pal.chakra, 1, sp2 * Math.PI / 8);
-      }
-      for (var rg = 0; rg < 8; rg++) {
-        var ra = rg * Math.PI / 4;
-        cube(Math.cos(ra) * 0.29, 6.55 + Math.sin(ra) * 0.29, -8.55, 0.09, 0.09, 0.05, pal.chakra, 1, 0);
-      }
+      /* relief wrestler, left */
+      cube(-1.25, 5.30, -8.5, 1.0, 1.4, 0.2, pal.stoneD, 1);
+      cube(-1.15, 6.18, -8.5, 0.52, 0.5, 0.2, pal.stoneD, 1);
+      cube(-1.72, 5.85, -8.5, 0.85, 0.24, 0.2, pal.stoneD, 1, 0.6);
+      cube(-0.55, 5.55, -8.5, 0.95, 0.24, 0.2, pal.stoneD, 1, -0.35);
+      cube(-1.62, 4.55, -8.5, 0.26, 0.8, 0.2, pal.stoneD, 1, 0.12);
+      cube(-0.92, 4.55, -8.5, 0.26, 0.8, 0.2, pal.stoneD, 1, -0.14);
 
-      /* 3D audience: bobs idly, jumps up when someone gets hit */
+      /* relief wrestler, right */
+      cube(1.25, 5.25, -8.5, 1.0, 1.4, 0.2, pal.stoneD, 1);
+      cube(1.15, 6.12, -8.5, 0.52, 0.5, 0.2, pal.stoneD, 1);
+      cube(1.72, 5.80, -8.5, 0.85, 0.24, 0.2, pal.stoneD, 1, -0.6);
+      cube(0.55, 5.50, -8.5, 0.95, 0.24, 0.2, pal.stoneD, 1, 0.35);
+      cube(1.62, 4.50, -8.5, 0.26, 0.8, 0.2, pal.stoneD, 1, -0.12);
+      cube(0.92, 4.50, -8.5, 0.26, 0.8, 0.2, pal.stoneD, 1, 0.14);
+
+      /* temple pillars + lintel */
+      cube(-4.0, 3.4, -8.3, 0.5, 6.8, 0.6, pal.stoneL, 1);
+      cube(4.0, 3.4, -8.3, 0.5, 6.8, 0.6, pal.stoneL, 1);
+      cube(0, 7.15, -8.3, 8.6, 0.5, 0.7, pal.stoneL, 1);
+
+      /* 3D audience: heads, hair, arms — arms go up when it gets loud */
       var cheering = st.cheer > 0;
       for (var c = 0; c < crowd.length; c++) {
         var sp = crowd[c];
         var bob = Math.sin(st.t * 2.0 + sp.ph) * 0.045;
-        var jump = cheering ? Math.abs(Math.sin(st.t * 10 + sp.ph)) * 0.34 : 0;
+        var jump = cheering ? Math.abs(Math.sin(st.t * 9 + sp.ph)) * 0.36 : 0;
         var by = sp.h * 0.5 + bob + jump - 0.15;
-        cube(sp.x, by, sp.z, 0.62, sp.h, 0.5, pal.crowd, 1);
-        cube(sp.x, by + sp.h * 0.5 + 0.17, sp.z, 0.42, 0.36, 0.42, pal.skin2, 1);
+        var topY = by + sp.h * 0.5;
+
+        cube(sp.x, by, sp.z, 0.58, sp.h, 0.46, sp.col, 1);
+        cube(sp.x, topY + 0.17, sp.z, 0.40, 0.34, 0.38, sp.skin, 1);
+        cube(sp.x, topY + 0.35, sp.z - 0.02, 0.42, 0.08, 0.38, sp.hair, 1);
+
+        if (cheering) {
+          var up = 0.22 + Math.abs(Math.sin(st.t * 9 + sp.ph)) * 0.16;
+          cube(sp.x - 0.34, topY + up, sp.z, 0.12, 0.42, 0.14, sp.skin, 1);
+          cube(sp.x + 0.34, topY + up, sp.z, 0.12, 0.42, 0.14, sp.skin, 1);
+        } else {
+          cube(sp.x - 0.33, by + 0.06, sp.z, 0.12, 0.34, 0.14, sp.skin, 1);
+          cube(sp.x + 0.33, by + 0.06, sp.z, 0.12, 0.34, 0.14, sp.skin, 1);
+        }
       }
 
       /* floor + ring mat */
@@ -2513,6 +2837,31 @@ body.has-touch .tips{ display:none; }
       if (E.isBoss) drawBoss(E, pal); else drawFighter(E, pal);
       drawFighter(P, pal);
 
+      /* ---- signature-move effects ---- */
+      var fighters = [P, E];
+      for (var fi = 0; fi < 2; fi++) {
+        var ff = fighters[fi];
+        if (!ff.sp) continue;
+        var st2 = ff.sp.t;
+
+        if (ff.sp.kind === 'lathi') {
+          var ang2 = st2 * 22 * ff.face;
+          cube(ff.x + Math.cos(ang2) * 1.1 * ff.face, ff.y + 1.2 + Math.sin(ang2) * 0.5, 0.1,
+               2.4, 0.12, 0.12, [0.72, 0.52, 0.24], 1, ang2);
+        } else if (ff.sp.kind === 'dhol') {
+          cube(ff.x + ff.face * 0.55, ff.y + 1.00, 0.15, 0.62, 0.46, 0.62, [0.72, 0.30, 0.16], 1);
+          cube(ff.x + ff.face * 0.55, ff.y + 1.25, 0.15, 0.66, 0.07, 0.66, pal.spark, 1);
+          if (st2 > 0.30) {
+            var rr = 1 + (st2 - 0.3) * 9;
+            cube(ff.x, 0.12, 0.2, rr * 2.2, 0.06, rr * 1.6, pal.spark, Math.max(0.15, 1 - (st2 - 0.3) * 2.2));
+          }
+        }
+      }
+
+      if (st.proj.on) {
+        cube(st.proj.x, st.proj.y, 0.25, 0.42, 0.12, 0.28, [0.35, 0.22, 0.55], 1, st.proj.spin);
+      }
+
       if (nv > 0) {
         gl.bindBuffer(gl.ARRAY_BUFFER, dynBuf);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, dyn.subarray(0, nv));
@@ -2557,6 +2906,20 @@ body.has-touch .tips{ display:none; }
         aiThink(dt);
         updateTrain(dt);
 
+        /* chappal in flight */
+        var pr = st.proj;
+        if (pr.on) {
+          pr.x += pr.vx * dt;
+          pr.life -= dt;
+          pr.spin += dt * 14;
+          var foe = pr.owner === P ? E : P;
+          if (foe.state !== 'ko' && Math.abs(pr.x - foe.x) < 0.9 && Math.abs(pr.y - (foe.y + 1.0)) < 1.2) {
+            hurtOpponent(pr.owner, foe, 13, 3, false);
+            pr.on = false;
+          }
+          if (pr.life <= 0 || Math.abs(pr.x) > 16) pr.on = false;
+        }
+
         st.timeLeft -= dt;
         if (st.timeLeft <= 0) {
           st.timeLeft = 0;
@@ -2569,6 +2932,24 @@ body.has-touch .tips{ display:none; }
       } else if (st.phase === 'finish') {
         st.finishT -= dt;
         if (st.finishT <= 0) { finishBtn.hidden = true; matchOver(); }
+      } else if (st.phase === 'celebrate') {
+        P.victory = true;
+        P.y = 1.3 + Math.sin(st.t * 3.2) * 0.14;
+        P.tilt = 0;
+        st.cheer = 2;
+        for (var ci = 0; ci < crowd.length; ci++) {
+          var spc = crowd[ci];
+          var tx = P.x + (ci - crowd.length / 2) * 0.58;
+          var tz = -1.5 - (ci % 2) * 0.6;
+          var kk3 = Math.min(1, dt * 2.6);
+          spc.x += (tx - spc.x) * kk3;
+          spc.z += (tz - spc.z) * kk3;
+        }
+        if (st.phaseT > 5.0) showEndCard(true);
+      } else if (st.phase === 'defeat') {
+        P.state = 'sit';
+        applyPose(P, dt);
+        if (st.phaseT > 5.6) showEndCard(false);
       } else if (st.phase === 'fatality') {
         var L = st.loser;
         var el = 3.0 - st.fatT;
@@ -2627,6 +3008,18 @@ body.has-touch .tips{ display:none; }
         if (s.life <= 0) s.on = false;
       }
 
+      /* music heat: fast footwork keeps the dhol going */
+      var pace = Math.abs(P.vx) + Math.abs(E.vx);
+      if (pace > 5) {
+        st.heat = Math.min(1, st.heat + dt * 0.20);
+        st.meter = Math.min(100, st.meter + dt * 3);
+      }
+      st.heat = Math.max(0, st.heat - dt * 0.14);
+
+      if (st.phase === 'fight' || st.phase === 'ko' || st.phase === 'fatality') {
+        musicTick(st.heat);
+      }
+
       updateCam(dt);
       draw();
       st.raf = requestAnimationFrame(frame);
@@ -2651,6 +3044,7 @@ body.has-touch .tips{ display:none; }
         st.round = 1; st.winsP = 0; st.winsE = 0; st.t = 0; st.last = 0;
         st.bossMode = false; st.bossDone = false;
         st.train.on = false; st.train.next = 15 + Math.random() * 6;
+        st.heat = 0; music.next = 0; music.step = 0;
         E.isBoss = false;
         if (nameE) nameE.textContent = 'Cpu';
         if (pipsP[0]) pipsP[0].parentElement.style.visibility = '';
@@ -2675,6 +3069,14 @@ body.has-touch .tips{ display:none; }
       resize: resize,
       setTheme: function (theme) { st.pal = PALETTE[theme] || PALETTE.dark; },
       fatality: doFatality,
+      special: function () {
+        if (st.meter < 100) return;
+        if (doSpecial(P, E)) {
+          st.meter = 0;
+          paintHud();
+          meme(P.ch.spName + '!', true);
+        }
+      },
       setChars: function (pc, ec) {
         P.ch = pc; P.maxHp = pc.hp; P.hp = pc.hp;
         E.ch = ec; E.maxHp = ec.hp; E.hp = ec.hp;
@@ -2735,6 +3137,8 @@ body.has-touch .tips{ display:none; }
       bindInput();
     }
 
+    if (dimEl) dimEl.classList.remove('is-on');
+    if (quoteEl) quoteEl.classList.remove('is-on');
     art.classList.add('is-hidden');
     fhud.hidden = false;
     pad.hidden = false;
@@ -2793,6 +3197,7 @@ body.has-touch .tips{ display:none; }
       else if (k === 'v' || k === 'V') input.upper = true;
       else if (k === 'b' || k === 'B') input.sweep = true;
       else if (k === 'c' || k === 'C' || k === 'l' || k === 'L') input.block = true;
+      else if (k === 'e' || k === 'E') { if (G && G.special) G.special(); return; }
       else if (k === 'f' || k === 'F') { if (G && G.fatality) G.fatality(); return; }
       else if (k === 'r' || k === 'R') { startGame(); return; }
       else return;
@@ -2824,6 +3229,10 @@ body.has-touch .tips{ display:none; }
             try { btn.setPointerCapture(e.pointerId); } catch (err) {}
           }
           btn.classList.add('is-down');
+          if (act === 'special') {
+            if (G && G.special) G.special();
+            return;
+          }
           input[act] = true;
         }
 
@@ -2885,6 +3294,8 @@ body.has-touch .tips{ display:none; }
   exitBtn.addEventListener('click', exitGame);
   overExit.addEventListener('click', exitGame);
   overBtn.addEventListener('click', function () {
+    if (dimEl) dimEl.classList.remove('is-on');
+    if (quoteEl) quoteEl.classList.remove('is-on');
     over.hidden = true;
     fhud.hidden = false;
     pad.hidden = false;
