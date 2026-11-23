@@ -18,9 +18,11 @@ One HTML file. One HTTP request. No dependencies, no trackers, no excuses for a 
 
 <div align="center">
 
-### ▶ [Play it now](https://hiamryuthere.github.io/a-404-game/)
+### ▶ [Play it now](https://a-404-game.netlify.app)
 
-**https://hiamryuthere.github.io/a-404-game/**
+**https://a-404-game.netlify.app**
+
+Live on Netlify. Works on desktop and touch.
 
 No install, no download. Opens in the browser and the fight starts on click.
 
